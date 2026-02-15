@@ -51,27 +51,20 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
     chmod +x /usr/local/bin/firecracker /usr/local/bin/jailer
 
 # =============================================================================
-# Stage 2: Download/Build Kernel
+# Stage 2: Download Kernel
 # =============================================================================
-FROM ubuntu:${UBUNTU_VERSION} AS kernel-build
+FROM alpine:3.19 AS kernel-download
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
-    xz-utils \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache curl ca-certificates
 
 ARG TARGETARCH
 WORKDIR /kernel
 
 # Download pre-built Firecracker-optimized kernel
-# These are maintained by the Firecracker team
-RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
-    if [ "$ARCH" = "x86_64" ]; then \
-        curl -fsSL "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.6/${ARCH}/vmlinux-5.10.204" -o /kernel/vmlinux; \
-    else \
-        curl -fsSL "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.6/${ARCH}/vmlinux-5.10.204" -o /kernel/vmlinux; \
-    fi && \
+# Using Fireactions project kernels (reliable hosting)
+RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") && \
+    curl -fsSL "https://storage.googleapis.com/fireactions/kernels/${ARCH}/5.10/vmlinux" \
+    -o /kernel/vmlinux && \
     chmod 644 /kernel/vmlinux
 
 # =============================================================================
@@ -89,7 +82,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# Increase size to accommodate Docker (~6GB recommended)
+# Rootfs size to accommodate Docker
 ARG ROOTFS_SIZE_MB=8192
 
 WORKDIR /rootfs-build
@@ -98,7 +91,7 @@ WORKDIR /rootfs-build
 RUN truncate -s ${ROOTFS_SIZE_MB}M rootfs.ext4 && \
     mkfs.ext4 -F rootfs.ext4
 
-# Bootstrap minimal Ubuntu with additional packages for Docker
+# Bootstrap minimal Ubuntu with packages for Docker
 RUN mkdir -p /mnt/rootfs && \
     mount -o loop rootfs.ext4 /mnt/rootfs && \
     debootstrap --variant=minbase --include=\
@@ -114,7 +107,6 @@ vim,\
 nano,\
 less,\
 htop,\
-top,\
 jq,\
 openssh-server,\
 iproute2,\
@@ -180,8 +172,8 @@ RUN mkdir -p /mnt/rootfs/etc/docker && \
     printf '{\n  "storage-driver": "overlay2",\n  "log-driver": "json-file",\n  "log-opts": {\n    "max-size": "10m",\n    "max-file": "3"\n  },\n  "live-restore": true\n}\n' \
         > /mnt/rootfs/etc/docker/daemon.json
 
-# Create directories
-RUN mkdir -p /mnt/rootfs/home/sandbox/{.config,.cache,.local/bin,.docker} && \
+# Create user directories
+RUN mkdir -p /mnt/rootfs/home/sandbox/{.config,.cache,.docker} && \
     chroot /mnt/rootfs chown -R 1000:1000 /home/sandbox
 
 # Install guest init script
@@ -234,7 +226,7 @@ COPY --from=firecracker-download /usr/local/bin/firecracker /usr/local/bin/firec
 COPY --from=firecracker-download /usr/local/bin/jailer /usr/local/bin/jailer
 
 # Copy kernel
-COPY --from=kernel-build /kernel/vmlinux /var/lib/firecracker/kernel/vmlinux
+COPY --from=kernel-download /kernel/vmlinux /var/lib/firecracker/kernel/vmlinux
 
 # Copy rootfs
 COPY --from=rootfs-builder /rootfs-build/rootfs.ext4 /var/lib/firecracker/rootfs/base.ext4

@@ -79,15 +79,6 @@ print_welcome() {
     if command -v docker &>/dev/null; then
         echo "  Docker:    $(docker --version 2>/dev/null | awk '{print $3}' | tr -d ',')"
     fi
-    if command -v go &>/dev/null; then
-        echo "  Go:        $(go version 2>/dev/null | awk '{print $3}')"
-    fi
-    if command -v node &>/dev/null; then
-        echo "  Node:      $(node --version 2>/dev/null)"
-    fi
-    if command -v python3 &>/dev/null; then
-        echo "  Python:    $(python3 --version 2>/dev/null | awk '{print $2}')"
-    fi
     echo ""
     echo "  Quick start:"
     echo "    docker run hello-world"

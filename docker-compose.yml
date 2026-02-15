@@ -23,7 +23,7 @@ services:
       dockerfile: Dockerfile
       args:
         FIRECRACKER_VERSION: v1.6.0
-        ROOTFS_SIZE_MB: 8192  # 8GB for Docker images
+        ROOTFS_SIZE_MB: 8192
     
     image: firecracker-base:latest
     container_name: firecracker-vm

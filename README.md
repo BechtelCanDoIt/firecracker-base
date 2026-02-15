@@ -5,22 +5,22 @@ Hardware-isolated container environment. Run Docker inside a Firecracker MicroVM
 ## Architecture
 
 ```
-┌───────────────────────────────────────────────────────────────────────┐
-│  HOST (Protected)                                                     │
-│  ┌──────────────────────────────────────────────────────────────────┐ │
+┌─────────────────────────────────────────────────────────────────────────┐
+│  HOST (Protected)                                                       │
+│  ┌───────────────────────────────────────────────────────────────────┐ │
 │  │  Docker Container (Alpine, ~50MB) - Firecracker VMM              │ │
-│  │       ↓ hardware isolation (KVM)                                 │ │
+│  │       ↓ hardware isolation (KVM)                                  │ │
 │  │  ┌─────────────────────────────────────────────────────────────┐ │ │
 │  │  │  MicroVM (separate kernel, isolated memory)                 │ │ │
-│  │  │  └── Ubuntu 24.04 + Docker Engine                           │ │ │
+│  │  │  └── Ubuntu 24.04 + Docker Engine                          │ │ │
 │  │  │       ├── Container A ──┐                                   │ │ │
-│  │  │       ├── Container B ──┼── Your workloads                  │ │ │
+│  │  │       ├── Container B ──┼── Your workloads                 │ │ │
 │  │  │       └── Container C ──┘                                   │ │ │
-│  │  │                                                             │ │ │
+│  │  │                                                              │ │ │
 │  │  │  /workspace ← mounted from host                             │ │ │
 │  │  └─────────────────────────────────────────────────────────────┘ │ │
-│  └──────────────────────────────────────────────────────────────────┘ │
-└───────────────────────────────────────────────────────────────────────┘
+│  └───────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Why This Architecture?
@@ -30,26 +30,8 @@ Hardware-isolated container environment. Run Docker inside a Firecracker MicroVM
 | Container escape | ⚠️ Host compromised | ✅ Still inside VM |
 | Kernel exploit | ⚠️ Host kernel affected | ✅ Only guest kernel |
 | Memory side-channel | ⚠️ Shared host memory | ✅ Hardware isolation |
-| Network stack access| ⚠️ Shared host network | ✅ Isolated TAP/virtio
+| Network stack access | ⚠️ Shared host network | ✅ Isolated TAP/virtio |
 | Rogue AI agent | ⚠️ Direct host access | ✅ VM barrier |
-
-### Docker isolation from host Docker
-The containers inside the VM use the guest kernel's namespaces and cgroups, not the host's. So even if Docker has a vulnerability, an attacker only compromises the guest kernel - they still face the hardware VM barrier (KVM + EPT) to reach the host.
-
-- Level 1: Hardware VM (Firecracker/KVM)
-- Level 2: Containers (namespaces on guest kernel)
-
-### The network isolation is meaningful because:
-
-#### Standard Docker 
-Containers share the host's network namespace (unless explicitly isolated). Even with bridge networking, they interact with the host's iptables, can potentially see host interfaces, and share the kernel's TCP/IP stack.
-
-#### Firecracker VM
-The VM gets a dedicated TAP device with virtio-net. It has its own complete network stack inside the guest kernel. Traffic is NAT'd through the VMM - no direct access to host network interfaces.
-
-## Why Nested Docker instead of Containerd/shims?
-An informed choice for ease of use while maintain host isolation - which is the main goal of this project.
-This project is intened for developer use, on a developer machine, and thus some production trade offs where made to streamline that experience. Good enough security for the use case.
 
 ## Requirements
 
@@ -127,7 +109,18 @@ docker compose up
 ## What's Included in the VM
 
 - **Docker Engine** with Docker Compose
-- **Basic trouble shooting**: curl, htop, ping
+- **Git**, vim, curl, htop, jq
+- **Minimal Ubuntu 24.04** base
+
+Need more tools? Install via `apt` or use Docker containers:
+```bash
+# Inside VM
+sudo apt-get update && sudo apt-get install -y python3 nodejs golang
+
+# Or use Docker
+docker run -it python:3.12 python
+docker run -it node:20 node
+```
 
 ## Security Model
 
@@ -244,16 +237,4 @@ firecracker-base/
 
 ## License
 
-- This project: Firecracker Base - Apache 2.0
-- Firecracker: Apache 2.0 [See in GitHub](https://github.com/firecracker-microvm/firecracker/blob/main/LICENSE)
-
-## References
-
-- [Firecracker Webiste](https://firecracker-microvm.github.io/)
-- [Firecracker GitHub](https://github.com/firecracker-microvm/firecracker)
-- [Firecracker Design](https://github.com/firecracker-microvm/firecracker/blob/main/docs/design.md)
-- [Firecracker Security](https://github.com/firecracker-microvm/firecracker/blob/main/docs/snapshotting/security.md)
-
-## AI Acknowlegement
-
-Most of this project was AI Vibe Coded with Opus 4.5 Extended.
+MIT
