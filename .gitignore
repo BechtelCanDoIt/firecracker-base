@@ -1,0 +1,31 @@
+# Environment and credentials
+.env
+.env_claude
+*.env.local
+
+# Workspace
+workspace/*
+!workspace/.gitkeep
+
+# Firecracker runtime
+*.ext4
+*.socket
+firecracker.log
+
+# Build artifacts
+rootfs/
+kernel/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

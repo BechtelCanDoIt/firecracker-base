@@ -1,0 +1,42 @@
+{
+  "boot-source": {
+    "kernel_image_path": "__KERNEL__",
+    "boot_args": "console=ttyS0 reboot=k panic=1 pci=off ip=__VM_IP__::__TAP_IP__:255.255.255.0::eth0:off"
+  },
+  "drives": [
+    {
+      "drive_id": "rootfs",
+      "path_on_host": "__ROOTFS__",
+      "is_root_device": true,
+      "is_read_only": false
+    },
+    {
+      "drive_id": "workspace",
+      "path_on_host": "__WORKSPACE__",
+      "is_root_device": false,
+      "is_read_only": false
+    }
+  ],
+  "machine-config": {
+    "vcpu_count": __VCPU__,
+    "mem_size_mib": __MEM__,
+    "smt": false
+  },
+  "network-interfaces": [
+    {
+      "iface_id": "eth0",
+      "guest_mac": "AA:FC:00:00:00:01",
+      "host_dev_name": "__TAP__"
+    }
+  ],
+  "logger": {
+    "log_path": "/dev/stderr",
+    "level": "Warning",
+    "show_level": true,
+    "show_log_origin": true
+  },
+  "mmds-config": {
+    "version": "V2",
+    "network_interfaces": ["eth0"]
+  }
+}

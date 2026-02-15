@@ -1,0 +1,75 @@
+# =============================================================================
+# firecracker-base - Docker Compose
+# =============================================================================
+# Hardware-isolated MicroVM with Docker inside.
+#
+# Requirements:
+#   - Linux host with KVM enabled (/dev/kvm)
+#   - Docker
+#
+# Usage:
+#   docker compose build    # ~15-20 min first time
+#   docker compose run --rm firecracker-base
+#
+#   # Inside VM:
+#   docker run hello-world
+#   docker compose up
+# =============================================================================
+
+services:
+  firecracker-base:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        FIRECRACKER_VERSION: v1.6.0
+        ROOTFS_SIZE_MB: 8192  # 8GB for Docker images
+    
+    image: firecracker-base:latest
+    container_name: firecracker-vm
+    hostname: firecracker-host
+    
+    # =========================================================================
+    # REQUIRED: KVM Access
+    # =========================================================================
+    devices:
+      - /dev/kvm:/dev/kvm
+    
+    # =========================================================================
+    # REQUIRED: Capabilities
+    # =========================================================================
+    cap_add:
+      - NET_ADMIN   # TAP device creation
+      - SYS_ADMIN   # Mount workspace image
+    
+    # =========================================================================
+    # SECURITY
+    # =========================================================================
+    security_opt:
+      - apparmor:unconfined  # Required for TAP device
+    
+    # =========================================================================
+    # VOLUMES
+    # =========================================================================
+    volumes:
+      # Your project directory - mounted at /workspace in VM
+      - ${HOST_WORKSPACE:-./workspace}:/workspace:rw
+    
+    # =========================================================================
+    # ENVIRONMENT
+    # =========================================================================
+    environment:
+      # VM Resources (sized for Docker workloads)
+      - FC_VCPU=${FC_VCPU:-4}
+      - FC_MEM=${FC_MEM:-4096}
+      - FC_WORKSPACE_SIZE=${FC_WORKSPACE_SIZE:-4096}
+      
+      # Logging
+      - FC_LOG_LEVEL=${FC_LOG_LEVEL:-Warning}
+    
+    # =========================================================================
+    # BEHAVIOR
+    # =========================================================================
+    stdin_open: true
+    tty: true
+    privileged: false
