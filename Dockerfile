@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # =============================================================================
 # firecracker-base - Hardware-Isolated MicroVM with Docker
 # =============================================================================
@@ -10,8 +11,10 @@
 # Architecture:
 #   Host → Firecracker VMM → MicroVM → Docker → Your Containers
 #
-# Usage:
-#   docker build -t firecracker-base:latest .
+# Build (requires privileged for loop mount):
+#   ./build.sh
+#
+# Run:
 #   docker run --rm -it \
 #     --device /dev/kvm \
 #     --cap-add NET_ADMIN \
@@ -92,7 +95,8 @@ RUN truncate -s ${ROOTFS_SIZE_MB}M rootfs.ext4 && \
     mkfs.ext4 -F rootfs.ext4
 
 # Bootstrap minimal Ubuntu with packages for Docker
-RUN mkdir -p /mnt/rootfs && \
+# NOTE: --security=insecure required for loop mount (use build.sh)
+RUN --security=insecure mkdir -p /mnt/rootfs && \
     mount -o loop rootfs.ext4 /mnt/rootfs && \
     debootstrap --variant=minbase --include=\
 systemd,systemd-sysv,\
@@ -121,7 +125,7 @@ libseccomp2 \
     noble /mnt/rootfs http://archive.ubuntu.com/ubuntu
 
 # Configure the rootfs
-RUN mount -o bind /dev /mnt/rootfs/dev && \
+RUN --security=insecure mount -o bind /dev /mnt/rootfs/dev && \
     mount -o bind /proc /mnt/rootfs/proc && \
     mount -o bind /sys /mnt/rootfs/sys && \
     # Set locale
@@ -150,7 +154,7 @@ RUN mount -o bind /dev /mnt/rootfs/dev && \
     chown 1000:1000 /mnt/rootfs/workspace
 
 # Install Docker
-RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+RUN --security=insecure curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
     gpg --dearmor -o /mnt/rootfs/usr/share/keyrings/docker-archive-keyring.gpg && \
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu noble stable" \
         > /mnt/rootfs/etc/apt/sources.list.d/docker.list && \
@@ -168,25 +172,26 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
     chroot /mnt/rootfs systemctl enable containerd
 
 # Configure Docker daemon for VM environment
-RUN mkdir -p /mnt/rootfs/etc/docker && \
+RUN --security=insecure mkdir -p /mnt/rootfs/etc/docker && \
     printf '{\n  "storage-driver": "overlay2",\n  "log-driver": "json-file",\n  "log-opts": {\n    "max-size": "10m",\n    "max-file": "3"\n  },\n  "live-restore": true\n}\n' \
         > /mnt/rootfs/etc/docker/daemon.json
 
 # Create user directories
-RUN mkdir -p /mnt/rootfs/home/sandbox/{.config,.cache,.docker} && \
+RUN --security=insecure mkdir -p /mnt/rootfs/home/sandbox/{.config,.cache,.docker} && \
     chroot /mnt/rootfs chown -R 1000:1000 /home/sandbox
 
 # Install guest init script
-COPY scripts/guest-init.sh /mnt/rootfs/usr/local/bin/guest-init.sh
-RUN chmod +x /mnt/rootfs/usr/local/bin/guest-init.sh
+COPY scripts/guest-init.sh /tmp/guest-init.sh
+RUN --security=insecure cp /tmp/guest-init.sh /mnt/rootfs/usr/local/bin/guest-init.sh && \
+    chmod +x /mnt/rootfs/usr/local/bin/guest-init.sh
 
 # Create systemd service for guest init
-RUN printf '[Unit]\nDescription=Guest VM Initialization\nAfter=network-online.target docker.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nExecStart=/usr/local/bin/guest-init.sh\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n' \
+RUN --security=insecure printf '[Unit]\nDescription=Guest VM Initialization\nAfter=network-online.target docker.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nExecStart=/usr/local/bin/guest-init.sh\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n' \
     > /mnt/rootfs/etc/systemd/system/guest-init.service && \
     chroot /mnt/rootfs systemctl enable guest-init.service
 
 # Cleanup and unmount
-RUN chroot /mnt/rootfs apt-get clean && \
+RUN --security=insecure chroot /mnt/rootfs apt-get clean && \
     rm -rf /mnt/rootfs/var/lib/apt/lists/* && \
     rm -rf /mnt/rootfs/var/cache/apt/archives/* && \
     umount /mnt/rootfs/sys /mnt/rootfs/proc /mnt/rootfs/dev && \

@@ -5,10 +5,17 @@
 #
 # Requirements:
 #   - Linux host with KVM enabled (/dev/kvm)
-#   - Docker
+#   - Docker with BuildKit
 #
 # Usage:
-#   docker compose build    # ~15-20 min first time
+#   # Build (requires privileged for loop mount - uses docker-container builder)
+#   docker buildx create --name firecracker-builder --use --driver docker-container
+#   docker buildx build --load --allow security.insecure -t firecracker-base:latest .
+#
+#   # Or use the build script:
+#   ./build.sh
+#
+#   # Run
 #   docker compose run --rm firecracker-base
 #
 #   # Inside VM:
@@ -18,13 +25,6 @@
 
 services:
   firecracker-base:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        FIRECRACKER_VERSION: v1.6.0
-        ROOTFS_SIZE_MB: 8192
-    
     image: firecracker-base:latest
     container_name: firecracker-vm
     hostname: firecracker-host
