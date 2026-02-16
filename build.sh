@@ -7,7 +7,7 @@
 #   2. Assemble final image with standard docker build
 # =============================================================================
 
-set -e
+set -euo pipefail
 
 IMAGE_NAME="${1:-firecracker-base:latest}"
 ROOTFS_SIZE_MB="${ROOTFS_SIZE_MB:-8192}"
@@ -40,7 +40,7 @@ build_rootfs() {
     # Create rootfs build script
     cat > "$BUILD_DIR/build-rootfs.sh" << 'ROOTFS_SCRIPT'
 #!/bin/bash
-set -e
+set -euo pipefail
 
 ROOTFS_SIZE_MB="${ROOTFS_SIZE_MB:-8192}"
 
@@ -81,7 +81,8 @@ locales,\
 iptables,\
 kmod,\
 procps,\
-libseccomp2 \
+libseccomp2,\
+udev \
     noble /mnt/rootfs http://archive.ubuntu.com/ubuntu
 
 # Configure rootfs
@@ -95,49 +96,118 @@ chroot /mnt/rootfs locale-gen en_US.UTF-8
 # Set hostname
 echo "firecracker-vm" > /mnt/rootfs/etc/hostname
 
-# Configure networking
+# Configure networking - static IP (faster and more reliable than DHCP)
 mkdir -p /mnt/rootfs/etc/systemd/network
-printf '[Match]\nName=eth0\n\n[Network]\nDHCP=yes\n' > /mnt/rootfs/etc/systemd/network/20-eth0.network
+cat > /mnt/rootfs/etc/systemd/network/20-eth0.network << 'NETCONF'
+[Match]
+Name=eth0
+
+[Network]
+DHCP=no
+Address=172.16.0.2/24
+Gateway=172.16.0.1
+DNS=8.8.8.8
+DNS=8.8.4.4
+NETCONF
 chroot /mnt/rootfs systemctl enable systemd-networkd
 chroot /mnt/rootfs systemctl enable systemd-resolved
+
+# Disable network-wait-online (causes boot delays)
+chroot /mnt/rootfs systemctl disable systemd-networkd-wait-online.service || true
 
 # Create sandbox user
 chroot /mnt/rootfs useradd -m -s /bin/bash -u 1000 sandbox
 echo "sandbox ALL=(ALL) NOPASSWD: ALL" > /mnt/rootfs/etc/sudoers.d/sandbox
 chmod 0440 /mnt/rootfs/etc/sudoers.d/sandbox
 
-# Set root password
-echo 'root:firecracker' | chroot /mnt/rootfs chpasswd
+# Lock root account (use sudo from sandbox user instead)
+chroot /mnt/rootfs passwd -l root || true
 
-# Auto-login on serial console (without device dependency)
-mkdir -p /mnt/rootfs/etc/systemd/system/serial-getty@ttyS0.service.d
-cat > /mnt/rootfs/etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf << 'SERIALCONF'
+# ============================================================================
+# Serial Console - standalone service (no device dependencies)
+# ============================================================================
+# The default serial-getty@.service template has BindsTo=dev-%i.device
+# which waits for udev - but Firecracker has no udev. Create standalone service.
+cat > /mnt/rootfs/etc/systemd/system/serial-console.service << 'SERIALSERVICE'
 [Unit]
-# Remove device dependency for VM environment
-ConditionPathExists=
+Description=Serial Console Login
+After=systemd-user-sessions.service
+After=rc-local.service
+Before=getty.target
+IgnoreOnIsolate=yes
+ConditionPathExists=/dev/ttyS0
 
 [Service]
-ExecStart=
 ExecStart=-/sbin/agetty --autologin sandbox --noclear --keep-baud 115200,38400,9600 ttyS0 linux
-SERIALCONF
+Type=idle
+Restart=always
+RestartSec=0
+UtmpIdentifier=ttyS0
+TTYPath=/dev/ttyS0
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=tty
 
-# Enable serial-getty explicitly
-chroot /mnt/rootfs systemctl enable serial-getty@ttyS0.service
+[Install]
+WantedBy=getty.target
+SERIALSERVICE
 
-# Configure fstab for workspace with short device timeout
-cat > /mnt/rootfs/etc/fstab << 'FSTABCONF'
-# Firecracker VM fstab
-/dev/vda / ext4 defaults 0 1
-/dev/vdb /workspace ext4 defaults,nofail,x-systemd.device-timeout=5s 0 2
-FSTABCONF
+chroot /mnt/rootfs systemctl enable serial-console.service
+
+# Mask template-based serial-getty (has device dependencies that hang)
+chroot /mnt/rootfs systemctl mask serial-getty@ttyS0.service || true
+
+# ============================================================================
+# Workspace mount - service instead of fstab (avoids systemd device units)
+# ============================================================================
+# fstab entries create dev-*.device units that wait for udev detection.
+# Use a simple mount script instead.
+cat > /mnt/rootfs/etc/fstab << 'FSTABEOF'
+# Firecracker VM - minimal fstab (rootfs mounted by kernel)
+# Workspace mounted by mount-workspace.service
+FSTABEOF
+
+cat > /mnt/rootfs/usr/local/bin/mount-workspace.sh << 'MOUNTSCRIPT'
+#!/bin/bash
+# Mount workspace if block device exists
+sleep 1
+if [ -b /dev/vdb ]; then
+    mkdir -p /workspace
+    mount /dev/vdb /workspace 2>/dev/null && \
+        chown 1000:1000 /workspace && \
+        echo "Workspace mounted successfully"
+fi
+MOUNTSCRIPT
+chmod +x /mnt/rootfs/usr/local/bin/mount-workspace.sh
+
+cat > /mnt/rootfs/etc/systemd/system/mount-workspace.service << 'MOUNTSERVICE'
+[Unit]
+Description=Mount Workspace Volume
+After=local-fs.target
+Before=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mount-workspace.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+MOUNTSERVICE
+chroot /mnt/rootfs systemctl enable mount-workspace.service
+
 mkdir -p /mnt/rootfs/workspace
 chown 1000:1000 /mnt/rootfs/workspace
 
+# ============================================================================
 # Install Docker
+# ============================================================================
 echo "Installing Docker..."
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
     gpg --dearmor -o /mnt/rootfs/usr/share/keyrings/docker-archive-keyring.gpg
-echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu noble stable" \
+ARCH=$(dpkg --print-architecture)
+echo "deb [arch=${ARCH} signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu noble stable" \
     > /mnt/rootfs/etc/apt/sources.list.d/docker.list
 chroot /mnt/rootfs apt-get update
 chroot /mnt/rootfs apt-get install -y --no-install-recommends \
@@ -152,8 +222,32 @@ chroot /mnt/rootfs systemctl enable containerd
 
 # Configure Docker daemon
 mkdir -p /mnt/rootfs/etc/docker
-printf '{\n  "storage-driver": "overlay2",\n  "log-driver": "json-file",\n  "log-opts": {\n    "max-size": "10m",\n    "max-file": "3"\n  },\n  "live-restore": true\n}\n' \
-    > /mnt/rootfs/etc/docker/daemon.json
+cat > /mnt/rootfs/etc/docker/daemon.json << 'DOCKERCONF'
+{
+  "storage-driver": "overlay2",
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "live-restore": true,
+  "iptables": true
+}
+DOCKERCONF
+
+# ============================================================================
+# Kernel modules and sysctl for Docker networking
+# ============================================================================
+cat > /mnt/rootfs/etc/modules-load.d/firecracker.conf << 'MODULES'
+overlay
+br_netfilter
+MODULES
+
+cat > /mnt/rootfs/etc/sysctl.d/99-docker.conf << 'SYSCTL'
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward = 1
+SYSCTL
 
 # Create user directories
 mkdir -p /mnt/rootfs/home/sandbox/{.config,.cache,.docker}
@@ -163,12 +257,27 @@ chroot /mnt/rootfs chown -R 1000:1000 /home/sandbox
 cp /scripts/guest-init.sh /mnt/rootfs/usr/local/bin/guest-init.sh
 chmod +x /mnt/rootfs/usr/local/bin/guest-init.sh
 
-# Create systemd service for guest init
-printf '[Unit]\nDescription=Guest VM Initialization\nAfter=network-online.target docker.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nExecStart=/usr/local/bin/guest-init.sh\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n' \
-    > /mnt/rootfs/etc/systemd/system/guest-init.service
+# Create systemd service for guest init (runs after Docker is ready)
+cat > /mnt/rootfs/etc/systemd/system/guest-init.service << 'GUESTINIT'
+[Unit]
+Description=Guest VM Initialization
+After=docker.service mount-workspace.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/guest-init.sh
+RemainAfterExit=yes
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target
+GUESTINIT
 chroot /mnt/rootfs systemctl enable guest-init.service
 
+# ============================================================================
 # Cleanup
+# ============================================================================
 chroot /mnt/rootfs apt-get clean
 rm -rf /mnt/rootfs/var/lib/apt/lists/*
 rm -rf /mnt/rootfs/var/cache/apt/archives/*

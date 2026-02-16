@@ -5,7 +5,7 @@
 # Creates an ext4 image from host directory for mounting in VM.
 # =============================================================================
 
-set -e
+set -euo pipefail
 
 SOURCE_DIR="${1:?Usage: create-workspace-image.sh <source_dir> <output_image> [size_mb]}"
 OUTPUT_IMAGE="${2:?Usage: create-workspace-image.sh <source_dir> <output_image> [size_mb]}"
@@ -29,16 +29,25 @@ mkfs.ext4 -F "$OUTPUT_IMAGE" >/dev/null 2>&1
 
 # Mount and sync content
 MOUNT_POINT=$(mktemp -d)
+cleanup_mount() {
+    if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+        umount "$MOUNT_POINT" || true
+    fi
+    rmdir "$MOUNT_POINT" 2>/dev/null || true
+}
+trap cleanup_mount EXIT
+
 mount -o loop "$OUTPUT_IMAGE" "$MOUNT_POINT"
 
-if [ -d "$SOURCE_DIR" ] && [ "$(ls -A $SOURCE_DIR 2>/dev/null)" ]; then
+if [ -d "$SOURCE_DIR" ] && [ "$(ls -A "$SOURCE_DIR" 2>/dev/null)" ]; then
     rsync -av "$SOURCE_DIR/" "$MOUNT_POINT/"
     
     # Fix ownership (sandbox user in VM is UID 1000)
-    chown -R 1000:1000 "$MOUNT_POINT"
+    chown -R 1000:1000 "$MOUNT_POINT" || true
 fi
 
 umount "$MOUNT_POINT"
-rmdir "$MOUNT_POINT"
+trap - EXIT
+cleanup_mount
 
 echo "Workspace image created: $OUTPUT_IMAGE (${SIZE_MB}MB)"

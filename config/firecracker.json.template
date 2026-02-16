@@ -1,7 +1,7 @@
 {
   "boot-source": {
     "kernel_image_path": "__KERNEL__",
-    "boot_args": "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw ip=__VM_IP__::__TAP_IP__:255.255.255.0::eth0:off"
+    "boot_args": "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
   },
   "drives": [
     {
@@ -31,7 +31,7 @@
   ],
   "logger": {
     "log_path": "/dev/stderr",
-    "level": "Warning",
+    "level": "__LOG_LEVEL__",
     "show_level": true,
     "show_log_origin": true
   },

@@ -6,7 +6,7 @@
 # The VM boots with vm-base rootfs and mounts workspace from host.
 # =============================================================================
 
-set -e
+set -euo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -34,6 +34,9 @@ FC_VM_IP="${FC_VM_IP:-172.16.0.2}"
 FC_SOCKET="/var/lib/firecracker/run/firecracker.socket"
 FC_LOG_LEVEL="${FC_LOG_LEVEL:-Warning}"
 FC_CONSOLE_TYPE="${FC_CONSOLE_TYPE:-interactive}"
+
+# Workspace sync-back disabled by default (can cause data loss with --delete)
+FC_SYNC_BACK="${FC_SYNC_BACK:-false}"
 
 # Workspace paths
 HOST_WORKSPACE="/workspace"
@@ -122,6 +125,7 @@ generate_config() {
         sed "s|__VCPU__|$FC_VCPU|g" | \
         sed "s|__MEM__|$FC_MEM|g" | \
         sed "s|__TAP__|$FC_TAP_DEVICE|g" | \
+        sed "s|__LOG_LEVEL__|$FC_LOG_LEVEL|g" | \
         sed "s|__VM_IP__|$FC_VM_IP|g" | \
         sed "s|__TAP_IP__|$FC_TAP_IP|g" \
         > /var/lib/firecracker/run/firecracker.json
@@ -153,7 +157,6 @@ start_firecracker() {
     echo ""
     echo -e "  ${YELLOW}Console:${NC}"
     echo "    Auto-login as 'sandbox' user"
-    echo "    Root password: 'firecracker' (emergency only)"
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
@@ -185,11 +188,15 @@ start_firecracker() {
 }
 
 sync_workspace_back() {
+    # Only sync if explicitly enabled
+    if [ "$FC_SYNC_BACK" != "true" ]; then
+        return 0
+    fi
     if [ -d "$HOST_WORKSPACE" ] && [ -f "$WORKSPACE_IMAGE" ]; then
         log_info "Syncing workspace changes back to host..."
         mkdir -p /tmp/workspace-mount
         if mount -o loop "$WORKSPACE_IMAGE" /tmp/workspace-mount 2>/dev/null; then
-            rsync -av --delete /tmp/workspace-mount/ "$HOST_WORKSPACE/"
+            rsync -av /tmp/workspace-mount/ "$HOST_WORKSPACE/"
             umount /tmp/workspace-mount
             log_ok "Workspace synced"
         fi
@@ -277,6 +284,8 @@ case "${1:-start}" in
         ;;
     detach)
         export FC_CONSOLE_TYPE=detached
+        ensure_directories
+        validate_files
         check_kvm
         setup_network
         prepare_workspace
