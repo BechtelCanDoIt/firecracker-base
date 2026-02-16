@@ -30,10 +30,11 @@ services:
     hostname: firecracker-host
     
     # =========================================================================
-    # REQUIRED: KVM Access
+    # REQUIRED: KVM Access and networking
     # =========================================================================
     devices:
       - /dev/kvm:/dev/kvm
+      - /dev/net/tun:/dev/net/tun
     
     # =========================================================================
     # REQUIRED: Capabilities
@@ -73,3 +74,7 @@ services:
     stdin_open: true
     tty: true
     privileged: false
+    
+    # Enable IP forwarding for NAT
+    sysctls:
+      - net.ipv4.ip_forward=1

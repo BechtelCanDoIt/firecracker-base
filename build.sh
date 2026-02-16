@@ -109,13 +109,27 @@ chmod 0440 /mnt/rootfs/etc/sudoers.d/sandbox
 # Set root password
 echo 'root:firecracker' | chroot /mnt/rootfs chpasswd
 
-# Auto-login on serial console
+# Auto-login on serial console (without device dependency)
 mkdir -p /mnt/rootfs/etc/systemd/system/serial-getty@ttyS0.service.d
-printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin sandbox --noclear %%I 115200 linux\n' \
-    > /mnt/rootfs/etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
+cat > /mnt/rootfs/etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf << 'SERIALCONF'
+[Unit]
+# Remove device dependency for VM environment
+ConditionPathExists=
 
-# Configure fstab for workspace
-echo '/dev/vdb /workspace ext4 defaults,nofail 0 2' >> /mnt/rootfs/etc/fstab
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin sandbox --noclear --keep-baud 115200,38400,9600 ttyS0 linux
+SERIALCONF
+
+# Enable serial-getty explicitly
+chroot /mnt/rootfs systemctl enable serial-getty@ttyS0.service
+
+# Configure fstab for workspace with short device timeout
+cat > /mnt/rootfs/etc/fstab << 'FSTABCONF'
+# Firecracker VM fstab
+/dev/vda / ext4 defaults 0 1
+/dev/vdb /workspace ext4 defaults,nofail,x-systemd.device-timeout=5s 0 2
+FSTABCONF
 mkdir -p /mnt/rootfs/workspace
 chown 1000:1000 /mnt/rootfs/workspace
 

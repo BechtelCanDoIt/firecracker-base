@@ -7,6 +7,13 @@
 
 set -e
 
+# Ensure /dev/net/tun exists
+if [ ! -e /dev/net/tun ]; then
+    mkdir -p /dev/net
+    mknod /dev/net/tun c 10 200
+    chmod 600 /dev/net/tun
+fi
+
 FC_TAP_DEVICE="${FC_TAP_DEVICE:-tap0}"
 FC_TAP_IP="${FC_TAP_IP:-172.16.0.1}"
 FC_VM_IP="${FC_VM_IP:-172.16.0.2}"
@@ -20,7 +27,7 @@ ip addr add "${FC_TAP_IP}/24" dev "$FC_TAP_DEVICE"
 ip link set "$FC_TAP_DEVICE" up
 
 # Enable IP forwarding
-echo 1 > /proc/sys/net/ipv4/ip_forward
+sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
 
 # Find the default route interface (for NAT)
 DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)

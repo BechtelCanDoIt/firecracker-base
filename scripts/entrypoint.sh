@@ -39,6 +39,28 @@ FC_CONSOLE_TYPE="${FC_CONSOLE_TYPE:-interactive}"
 HOST_WORKSPACE="/workspace"
 WORKSPACE_IMAGE="/var/lib/firecracker/workspace/workspace.ext4"
 
+# ============================================================================
+# Ensure folders/files are in place
+# ============================================================================
+ensure_directories() {
+    mkdir -p /var/lib/firecracker/rootfs
+    mkdir -p /var/lib/firecracker/kernel
+    mkdir -p /var/lib/firecracker/workspace
+    mkdir -p /var/lib/firecracker/run
+}
+
+validate_files() {
+    if [ ! -f "$FC_KERNEL" ]; then
+        log_error "Kernel not found: $FC_KERNEL"
+        exit 1
+    fi
+    if [ ! -f "$FC_ROOTFS" ]; then
+        log_error "Rootfs not found: $FC_ROOTFS"
+        exit 1
+    fi
+    log_ok "Kernel and rootfs validated"
+}
+
 # =============================================================================
 # Functions
 # =============================================================================
@@ -68,7 +90,9 @@ setup_network() {
 
 prepare_workspace() {
     log_info "Preparing workspace image (${FC_WORKSPACE_SIZE}MB)..."
-    
+   
+    mkdir -p "$(dirname "$WORKSPACE_IMAGE")"
+ 
     if [ -d "$HOST_WORKSPACE" ] && [ "$(ls -A $HOST_WORKSPACE 2>/dev/null)" ]; then
         log_info "Syncing host workspace to VM image..."
         /usr/local/bin/create-workspace-image.sh \
@@ -161,15 +185,14 @@ start_firecracker() {
 }
 
 sync_workspace_back() {
-    if [ -d "$HOST_WORKSPACE" ]; then
+    if [ -d "$HOST_WORKSPACE" ] && [ -f "$WORKSPACE_IMAGE" ]; then
         log_info "Syncing workspace changes back to host..."
-        
         mkdir -p /tmp/workspace-mount
-        mount -o loop "$WORKSPACE_IMAGE" /tmp/workspace-mount
-        rsync -av --delete /tmp/workspace-mount/ "$HOST_WORKSPACE/"
-        umount /tmp/workspace-mount
-        
-        log_ok "Workspace synced"
+        if mount -o loop "$WORKSPACE_IMAGE" /tmp/workspace-mount 2>/dev/null; then
+            rsync -av --delete /tmp/workspace-mount/ "$HOST_WORKSPACE/"
+            umount /tmp/workspace-mount
+            log_ok "Workspace synced"
+        fi
     fi
 }
 
@@ -244,6 +267,8 @@ trap cleanup EXIT
 
 case "${1:-start}" in
     start|shell)
+        ensure_directories
+        validate_files 
         check_kvm
         setup_network
         prepare_workspace
