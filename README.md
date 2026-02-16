@@ -49,8 +49,9 @@ egrep -c '(vmx|svm)' /proc/cpuinfo  # Should be > 0
 ## Quick Start
 
 ```bash
-# Build (first time takes ~15-20 min - downloads Docker, Go, Node)
-docker compose build
+# Build (requires privileged mode for loop mount)
+chmod +x build.sh
+./build.sh
 
 # Run
 docker compose run --rm firecracker-base
