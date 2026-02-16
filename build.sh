@@ -59,7 +59,7 @@ mount -o loop rootfs.ext4 /mnt/rootfs
 # Bootstrap Ubuntu
 echo "Running debootstrap (this takes a few minutes)..."
 debootstrap --variant=minbase --include=\
-systemd,systemd-sysv,\
+systemd,systemd-sysv,systemd-resolved,\
 dbus,\
 sudo,\
 curl,\

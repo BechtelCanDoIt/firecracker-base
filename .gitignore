@@ -15,6 +15,7 @@ firecracker.log
 # Build artifacts
 rootfs/
 kernel/
+.build
 
 # IDE
 .idea/
