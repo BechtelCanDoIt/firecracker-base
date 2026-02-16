@@ -1,5 +1,6 @@
 # Turning on local KVM module
-Chances are your KVM functionality is turned off by default.
+Chances are your host system KVM functionality is turned off by default.
+These directions are for ubuntu linux.
 
 ## 1. Check if KVM modules are available
 ```
