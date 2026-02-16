@@ -75,7 +75,7 @@ jq,\
 openssh-server,\
 iproute2,\
 iputils-ping,\
-dnsutils,\
+bind9-dnsutils,\
 netcat-openbsd,\
 locales,\
 iptables,\
