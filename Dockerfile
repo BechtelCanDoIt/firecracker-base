@@ -173,8 +173,12 @@ RUN --security=insecure curl -fsSL https://download.docker.com/linux/ubuntu/gpg 
 
 # Configure Docker daemon for VM environment
 RUN --security=insecure mkdir -p /mnt/rootfs/etc/docker && \
-    printf '{\n  "storage-driver": "overlay2",\n  "log-driver": "json-file",\n  "log-opts": {\n    "max-size": "10m",\n    "max-file": "3"\n  },\n  "live-restore": true\n}\n' \
+    printf '{\n  "log-driver": "json-file",\n  "log-opts": {\n    "max-size": "10m",\n    "max-file": "3"\n  },\n  "live-restore": true\n}\n' \
         > /mnt/rootfs/etc/docker/daemon.json
+
+### host networking - add above
+### "iptables": "false",\n  "ip-masq": "false",\n  "bridge": "none",\n
+
 
 # Create user directories
 RUN --security=insecure mkdir -p /mnt/rootfs/home/sandbox/{.config,.cache,.docker} && \

@@ -25,6 +25,31 @@ wait_for_network() {
     return 1
 }
 
+ensure_docker_running() {
+    systemctl start containerd.service 2>/dev/null || true
+    systemctl start docker.socket 2>/dev/null || true
+    systemctl start docker.service 2>/dev/null || true
+
+    if docker info &>/dev/null; then
+        return 0
+    fi
+
+    mkdir -p /etc/docker
+
+    if grep -qE '^nodev[[:space:]]+overlay$' /proc/filesystems; then
+        cat > /etc/docker/daemon.json <<EOF
+{"storage-driver":"overlay2"}
+EOF
+    else
+        cat > /etc/docker/daemon.json <<EOF
+{"storage-driver":"vfs"}
+EOF
+    fi
+
+    systemctl restart docker.service 2>/dev/null || true
+    docker info &>/dev/null
+}
+
 # Wait for Docker to be ready
 wait_for_docker() {
     local max_attempts=30
@@ -92,6 +117,7 @@ main() {
     echo "Initializing guest VM..."
     
     wait_for_network || true
+    ensure_docker_running || true
     wait_for_docker || true
     configure_environment
     print_welcome
@@ -99,4 +125,4 @@ main() {
     echo "Guest initialization complete"
 }
 
-main "$@"
+main "$@":

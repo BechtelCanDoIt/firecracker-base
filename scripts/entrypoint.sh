@@ -137,9 +137,10 @@ start_firecracker() {
     log_info "Starting Firecracker MicroVM..."
     echo ""
     echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║${NC}  Firecracker MicroVM                                          ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}  Hardware-Isolated Development Environment                   ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}  Firecracker MicroVM                                           ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}  Hardware-Isolated Development Environment                     ${GREEN}║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
+
     echo ""
     echo -e "  ${YELLOW}VM Configuration:${NC}"
     echo "    vCPUs:     $FC_VCPU"
