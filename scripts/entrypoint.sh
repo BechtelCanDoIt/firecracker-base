@@ -125,9 +125,7 @@ generate_config() {
         sed "s|__VCPU__|$FC_VCPU|g" | \
         sed "s|__MEM__|$FC_MEM|g" | \
         sed "s|__TAP__|$FC_TAP_DEVICE|g" | \
-        sed "s|__LOG_LEVEL__|$FC_LOG_LEVEL|g" | \
-        sed "s|__VM_IP__|$FC_VM_IP|g" | \
-        sed "s|__TAP_IP__|$FC_TAP_IP|g" \
+        sed "s|__LOG_LEVEL__|$FC_LOG_LEVEL|g" \
         > /var/lib/firecracker/run/firecracker.json
     
     log_ok "Config generated"

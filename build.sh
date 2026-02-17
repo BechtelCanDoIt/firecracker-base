@@ -2,24 +2,28 @@
 # =============================================================================
 # Build firecracker-base image
 # =============================================================================
-# Two-stage build:
-#   1. Create rootfs in privileged container (for loop mount)
-#   2. Assemble final image with standard docker build
+# Three-stage build:
+#   1. Build kernel with Docker-compatible config
+#   2. Create rootfs in privileged container (for loop mount)
+#   3. Assemble final image with standard docker build
 # =============================================================================
 
 set -euo pipefail
 
-IMAGE_NAME="${1:-firecracker-base:latest}"
+IMAGE_NAME="firecracker-base:latest"
 ROOTFS_SIZE_MB="${ROOTFS_SIZE_MB:-8192}"
+LINUX_VERSION="${LINUX_VERSION:-v5.10.213}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
 log_info()  { echo -e "${GREEN}[build]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[build]${NC} $*"; }
 log_error() { echo -e "${RED}[build]${NC} $*" >&2; }
+log_step()  { echo -e "${BLUE}[build]${NC} $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/.build"
@@ -27,6 +31,72 @@ BUILD_DIR="$SCRIPT_DIR/.build"
 cleanup() {
     log_info "Cleaning up..."
     rm -rf "$BUILD_DIR"
+}
+
+# =============================================================================
+# Stage 0: Build kernel with Docker support
+# =============================================================================
+build_kernel() {
+    log_info "Stage 0: Building kernel (this takes 10-15 minutes)..."
+    
+    mkdir -p "$BUILD_DIR"
+    
+    # Check if kernel config exists
+    if [ ! -f "$SCRIPT_DIR/config/kernel-firecracker-docker.config" ]; then
+        log_error "Kernel config not found: $SCRIPT_DIR/config/kernel-firecracker-docker.config"
+        exit 1
+    fi
+    
+    # Copy kernel config to build dir
+    cp "$SCRIPT_DIR/config/kernel-firecracker-docker.config" "$BUILD_DIR/"
+    
+    log_step "Compiling Linux $LINUX_VERSION with Docker support..."
+    log_step "This includes: namespaces, cgroups, overlay fs, netfilter, iptables..."
+    
+    docker run --rm \
+        -v "$BUILD_DIR:/build" \
+        ubuntu:24.04 \
+        bash -c '
+set -e
+
+echo "Installing build dependencies..."
+apt-get update
+apt-get install -y --no-install-recommends \
+    build-essential \
+    flex \
+    bison \
+    bc \
+    libssl-dev \
+    libelf-dev \
+    git \
+    ca-certificates
+
+echo "Cloning Linux kernel '"$LINUX_VERSION"'..."
+git clone --depth 1 --branch '"$LINUX_VERSION"' https://github.com/gregkh/linux.git /tmp/linux
+cd /tmp/linux
+
+echo "Configuring kernel..."
+make x86_64_defconfig
+./scripts/kconfig/merge_config.sh -m .config /build/kernel-firecracker-docker.config
+make olddefconfig
+
+echo "Building kernel (this takes a while)..."
+make -j$(nproc) vmlinux
+
+echo "Copying kernel..."
+cp vmlinux /build/vmlinux
+chmod 644 /build/vmlinux
+
+echo "Kernel build complete!"
+echo "Kernel size: $(du -h /build/vmlinux | cut -f1)"
+'
+    
+    if [ ! -f "$BUILD_DIR/vmlinux" ]; then
+        log_error "Kernel build failed!"
+        exit 1
+    fi
+    
+    log_info "Kernel built: $BUILD_DIR/vmlinux"
 }
 
 # =============================================================================
@@ -93,8 +163,13 @@ mount -o bind /sys /mnt/rootfs/sys
 # Set locale
 chroot /mnt/rootfs locale-gen en_US.UTF-8
 
-# Set hostname
+# Set hostname and hosts file
 echo "firecracker-vm" > /mnt/rootfs/etc/hostname
+cat > /mnt/rootfs/etc/hosts << 'HOSTS'
+127.0.0.1   localhost
+127.0.1.1   firecracker-vm
+::1         localhost ip6-localhost ip6-loopback
+HOSTS
 
 # Configure networking - static IP (faster and more reliable than DHCP)
 mkdir -p /mnt/rootfs/etc/systemd/network
@@ -126,8 +201,6 @@ chroot /mnt/rootfs passwd -l root || true
 # ============================================================================
 # Serial Console - standalone service (no device dependencies)
 # ============================================================================
-# The default serial-getty@.service template has BindsTo=dev-%i.device
-# which waits for udev - but Firecracker has no udev. Create standalone service.
 cat > /mnt/rootfs/etc/systemd/system/serial-console.service << 'SERIALSERVICE'
 [Unit]
 Description=Serial Console Login
@@ -154,15 +227,11 @@ WantedBy=getty.target
 SERIALSERVICE
 
 chroot /mnt/rootfs systemctl enable serial-console.service
-
-# Mask template-based serial-getty (has device dependencies that hang)
 chroot /mnt/rootfs systemctl mask serial-getty@ttyS0.service || true
 
 # ============================================================================
-# Workspace mount - service instead of fstab (avoids systemd device units)
+# Workspace mount - service instead of fstab
 # ============================================================================
-# fstab entries create dev-*.device units that wait for udev detection.
-# Use a simple mount script instead.
 cat > /mnt/rootfs/etc/fstab << 'FSTABEOF'
 # Firecracker VM - minimal fstab (rootfs mounted by kernel)
 # Workspace mounted by mount-workspace.service
@@ -170,7 +239,6 @@ FSTABEOF
 
 cat > /mnt/rootfs/usr/local/bin/mount-workspace.sh << 'MOUNTSCRIPT'
 #!/bin/bash
-# Mount workspace if block device exists
 sleep 1
 if [ -b /dev/vdb ]; then
     mkdir -p /workspace
@@ -220,6 +288,10 @@ chroot /mnt/rootfs usermod -aG docker sandbox
 chroot /mnt/rootfs systemctl enable docker
 chroot /mnt/rootfs systemctl enable containerd
 
+# Force iptables-legacy (kernel may not have full nftables support)
+chroot /mnt/rootfs update-alternatives --set iptables /usr/sbin/iptables-legacy || true
+chroot /mnt/rootfs update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
+
 # Configure Docker daemon
 mkdir -p /mnt/rootfs/etc/docker
 cat > /mnt/rootfs/etc/docker/daemon.json << 'DOCKERCONF'
@@ -230,8 +302,9 @@ cat > /mnt/rootfs/etc/docker/daemon.json << 'DOCKERCONF'
     "max-size": "10m",
     "max-file": "3"
   },
-  "live-restore": true,
-  "iptables": true
+  "iptables": true,
+  "ip-forward": true,
+  "live-restore": false
 }
 DOCKERCONF
 
@@ -257,7 +330,7 @@ chroot /mnt/rootfs chown -R 1000:1000 /home/sandbox
 cp /scripts/guest-init.sh /mnt/rootfs/usr/local/bin/guest-init.sh
 chmod +x /mnt/rootfs/usr/local/bin/guest-init.sh
 
-# Create systemd service for guest init (runs after Docker is ready)
+# Create systemd service for guest init
 cat > /mnt/rootfs/etc/systemd/system/guest-init.service << 'GUESTINIT'
 [Unit]
 Description=Guest VM Initialization
@@ -317,7 +390,14 @@ ROOTFS_SCRIPT
 build_image() {
     log_info "Stage 2: Building final image..."
     
-    # Create minimal Dockerfile for final assembly
+    # Check that kernel exists
+    if [ ! -f "$BUILD_DIR/vmlinux" ]; then
+        log_error "Kernel not found at $BUILD_DIR/vmlinux"
+        log_error "Run './build.sh' without arguments to build kernel first"
+        exit 1
+    fi
+    
+    # Create Dockerfile for final assembly
     cat > "$BUILD_DIR/Dockerfile.final" << 'DOCKERFILE'
 # syntax=docker/dockerfile:1.4
 FROM alpine:3.19 AS firecracker-download
@@ -336,18 +416,6 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
     mv release-${FIRECRACKER_VERSION}-${ARCH}/firecracker-${FIRECRACKER_VERSION}-${ARCH} /usr/local/bin/firecracker && \
     mv release-${FIRECRACKER_VERSION}-${ARCH}/jailer-${FIRECRACKER_VERSION}-${ARCH} /usr/local/bin/jailer && \
     chmod +x /usr/local/bin/firecracker /usr/local/bin/jailer
-
-FROM alpine:3.19 AS kernel-download
-
-RUN apk add --no-cache curl ca-certificates
-
-ARG TARGETARCH
-WORKDIR /kernel
-
-RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") && \
-    curl -fsSL "https://storage.googleapis.com/fireactions/kernels/${ARCH}/5.10/vmlinux" \
-    -o /kernel/vmlinux && \
-    chmod 644 /kernel/vmlinux
 
 FROM alpine:3.19 AS runtime
 
@@ -375,7 +443,9 @@ RUN apk add --no-cache \
 
 COPY --from=firecracker-download /usr/local/bin/firecracker /usr/local/bin/firecracker
 COPY --from=firecracker-download /usr/local/bin/jailer /usr/local/bin/jailer
-COPY --from=kernel-download /kernel/vmlinux /var/lib/firecracker/kernel/vmlinux
+
+# Copy custom-built kernel with Docker support
+COPY vmlinux /var/lib/firecracker/kernel/vmlinux
 
 # Copy pre-built rootfs
 COPY rootfs.ext4 /var/lib/firecracker/rootfs/base.ext4
@@ -422,24 +492,120 @@ DOCKERFILE
 # =============================================================================
 # Main
 # =============================================================================
+show_help() {
+    cat << EOF
+Build firecracker-base image with Docker support
+
+Usage: ./build.sh [OPTIONS] [IMAGE_NAME]
+
+Options:
+  --help          Show this help
+  --clean         Remove build artifacts and rebuild everything
+  --kernel-only   Only rebuild the kernel
+  --rootfs-only   Only rebuild the rootfs
+  --image-only    Only rebuild the final image (requires existing kernel/rootfs)
+
+Environment Variables:
+  ROOTFS_SIZE_MB  Size of rootfs image in MB (default: 8192)
+  LINUX_VERSION   Linux kernel version to build (default: v5.10.213)
+
+Examples:
+  ./build.sh                      # Full build
+  ./build.sh --clean              # Clean rebuild
+  ./build.sh --kernel-only        # Rebuild just the kernel
+  ./build.sh my-image:v1          # Build with custom image name
+EOF
+}
+
 main() {
+    local do_kernel=true
+    local do_rootfs=true
+    local do_image=true
+    local do_clean=false
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            --clean)
+                do_clean=true
+                shift
+                ;;
+            --kernel-only)
+                do_rootfs=false
+                do_image=false
+                shift
+                ;;
+            --rootfs-only)
+                do_kernel=false
+                do_image=false
+                shift
+                ;;
+            --image-only)
+                do_kernel=false
+                do_rootfs=false
+                shift
+                ;;
+            -*)
+                log_error "Unknown option: $1"
+                show_help
+                exit 1
+                ;;
+            *)
+                IMAGE_NAME="$1"
+                shift
+                ;;
+        esac
+    done
+    
     log_info "Building $IMAGE_NAME"
     echo ""
     
-    # Check for existing rootfs to skip rebuild
-    if [ -f "$BUILD_DIR/rootfs.ext4" ]; then
-        log_warn "Found existing rootfs at $BUILD_DIR/rootfs.ext4"
-        read -p "Rebuild rootfs? [y/N] " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            rm -f "$BUILD_DIR/rootfs.ext4"
-            build_rootfs
-        fi
-    else
-        build_rootfs
+    # Clean if requested
+    if [ "$do_clean" = true ]; then
+        log_warn "Cleaning build directory..."
+        rm -rf "$BUILD_DIR"
     fi
     
-    build_image
+    mkdir -p "$BUILD_DIR"
+    
+    # Build kernel if needed
+    if [ "$do_kernel" = true ]; then
+        if [ -f "$BUILD_DIR/vmlinux" ] && [ "$do_clean" = false ]; then
+            log_warn "Found existing kernel at $BUILD_DIR/vmlinux"
+            read -p "Rebuild kernel? (takes 10-15 min) [y/N] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                rm -f "$BUILD_DIR/vmlinux"
+                build_kernel
+            fi
+        else
+            build_kernel
+        fi
+    fi
+    
+    # Build rootfs if needed
+    if [ "$do_rootfs" = true ]; then
+        if [ -f "$BUILD_DIR/rootfs.ext4" ] && [ "$do_clean" = false ]; then
+            log_warn "Found existing rootfs at $BUILD_DIR/rootfs.ext4"
+            read -p "Rebuild rootfs? [y/N] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                rm -f "$BUILD_DIR/rootfs.ext4"
+                build_rootfs
+            fi
+        else
+            build_rootfs
+        fi
+    fi
+    
+    # Build final image
+    if [ "$do_image" = true ]; then
+        build_image
+    fi
     
     echo ""
     log_info "Build complete!"
@@ -447,8 +613,11 @@ main() {
     echo "Run with:"
     echo "  docker compose run --rm firecracker-base"
     echo ""
-    echo "To rebuild rootfs from scratch:"
-    echo "  rm -rf .build && ./build.sh"
+    echo "Or directly:"
+    echo "  docker run --rm -it --device /dev/kvm --cap-add NET_ADMIN firecracker-base:latest"
+    echo ""
+    echo "To rebuild everything from scratch:"
+    echo "  ./build.sh --clean"
 }
 
 main "$@"

@@ -1,29 +1,35 @@
-# firecracker-base
+# Firecracker-Base: Hardware-Isolated Docker Environment
 
-Hardware-isolated container environment. Run Docker inside a Firecracker MicroVM for maximum security.
-
-## Architecture
+Run Docker containers inside a Firecracker MicroVM for maximum security isolation.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  HOST (Protected)                                                       │
-│  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │  Docker Container (Alpine, ~50MB) - Firecracker VMM              │ │
-│  │       ↓ hardware isolation (KVM)                                  │ │
-│  │  ┌─────────────────────────────────────────────────────────────┐ │ │
-│  │  │  MicroVM (separate kernel, isolated memory)                 │ │ │
-│  │  │  └── Ubuntu 24.04 + Docker Engine                          │ │ │
-│  │  │       ├── Container A ──┐                                   │ │ │
-│  │  │       ├── Container B ──┼── Your workloads                 │ │ │
-│  │  │       └── Container C ──┘                                   │ │ │
-│  │  │                                                              │ │ │
-│  │  │  /workspace ← mounted from host                             │ │ │
-│  │  └─────────────────────────────────────────────────────────────┘ │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  Host System                                                │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  Docker Container (firecracker-base KVM)              │  │
+│  │  ┌─────────────────────────────────────────────────┐  │  │
+│  │  │  Firecracker MicroVM (separe kernel/memory)     │  │  │
+│  │  │  ┌───────────────────────────────────────────┐  │  │  │
+│  │  │  │  Docker Engine                            │  │  │  │
+│  │  │  │  ┌─────────┐ ┌─────────┐ ┌─────────┐      │  │  │  │
+│  │  │  │  │Container│ │Container│ │Container│      │  │  │  │
+│  │  │  │  └─────────┘ └─────────┘ └─────────┘      │  │  │  │
+│  │  │  │                                           │  │  │  │
+│  │  │  │  /workspace ← mounted from host           │  │  │  │
+│  │  │  └───────────────────────────────────────────┘  │  │  │
+│  │  └─────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Why This Architecture?
+## Security Isolation
+
+Your containers are protected from the host by:
+
+- **Separate kernel**: Guest runs its own Linux kernel, not the host kernel
+- **Hardware memory isolation**: Intel EPT / AMD NPT enforced by CPU
+- **Minimal attack surface**: Firecracker VMM is ~50k lines of code
+- **Complete containment**: Container escapes are contained within the VM
 
 | Threat | Standard Docker | Docker in Firecracker VM |
 |--------|-----------------|--------------------------|
@@ -33,209 +39,229 @@ Hardware-isolated container environment. Run Docker inside a Firecracker MicroVM
 | Network stack access | ⚠️ Shared host network | ✅ Isolated TAP/virtio |
 | Rogue AI agent | ⚠️ Direct host access | ✅ VM barrier |
 
-## Requirements
-
-- Linux host with KVM (`/dev/kvm`)
-- Docker
-
-```bash
-# Check KVM support
-ls -la /dev/kvm
-egrep -c '(vmx|svm)' /proc/cpuinfo  # Should be > 0
-
-# If /dev/kvm missing, see TURNONKVM.md
-```
 
 ## Quick Start
 
+### Prerequisites
+
+- Linux host with KVM enabled (`/dev/kvm` accessible)
+- Docker installed on the host
+
+### Build
+
 ```bash
-# Build (requires privileged mode for loop mount)
-chmod +x build.sh
+# Build requires privileged mode for loop mounts
 ./build.sh
-
-# Run
-docker compose run --rm firecracker-base
-
-# Inside VM - you have full Docker!
-docker run hello-world
-docker compose up -d
-docker build -t myapp .
 ```
 
-## Configuration
+### Run
 
-### Environment Variables
+```bash
+docker run --rm -it \
+  --device /dev/kvm \
+  --cap-add NET_ADMIN \
+  -v /path/to/your/workspace:/workspace:rw \
+  -e FC_VCPU=30 \
+  -e FC_MEM=20000 \
+  -e FC_WORKSPACE_SIZE=10000 \
+  firecracker-base:latest
+```
+
+Inside the VM:
+```bash
+# Verify Docker is working
+docker run hello-world
+
+# Run your containers
+docker compose up
+cd /workspace && docker build .
+```
+
+## Light Configuration
+This works but is sluggish. It also doesn't provide much for what you might install inside the microVM.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FC_VCPU` | 4 | Number of vCPUs for VM |
-| `FC_MEM` | 4096 | Memory in MB |
-| `FC_WORKSPACE_SIZE` | 4096 | Workspace volume size (MB) |
-| `FC_LOG_LEVEL` | Warning | Firecracker log level |
+| FC_VCPU | 4 | Number of vCPUs |
+| FC_MEM | 4096 | Memory in MB |
+| FC_WORKSPACE_SIZE | 4096 | Workspace image size in MB |
+| FC_LOG_LEVEL | Warning | Log level: Error, Warning, Info, Debug |
 
-### Resource Recommendations
-
-| Workload | vCPUs | Memory | Example |
-|----------|-------|--------|---------|
-| Light (single container) | 2 | 2048 | Simple API |
-| Medium (few containers) | 4 | 4096 | App + DB |
-| Heavy (docker compose) | 8 | 8192 | Full stack |
-
-```bash
-# Run with more resources
-docker run --rm -it \
-  --device /dev/kvm \
-  --cap-add NET_ADMIN \
-  -e FC_VCPU=8 -e FC_MEM=8192 \
-  -v $(pwd)/workspace:/workspace \
-  firecracker-base:latest
-```
-
-## Workspace
-
-Your host directory is mounted at `/workspace` inside the VM:
-
-```bash
-docker run --rm -it \
-  --device /dev/kvm \
-  --cap-add NET_ADMIN \
-  -v /path/to/your/project:/workspace \
-  firecracker-base:latest
-
-# Inside VM:
-cd /workspace
-docker compose up
-```
-
-## What's Included in the VM
-
-- **Docker Engine** with Docker Compose
-- **Git**, vim, curl, htop, jq
-- **Minimal Ubuntu 24.04** base
-
-Need more tools? Install via `apt` or use Docker containers:
-```bash
-# Inside VM
-sudo apt-get update && sudo apt-get install -y python3 nodejs golang
-
-# Or use Docker
-docker run -it python:3.12 python
-docker run -it node:20 node
-```
-
-## Security Model
-
-```
-Attack Path Analysis:
-
-Rogue Container → Docker Daemon → Guest Kernel → [HARDWARE BARRIER] → Host
-                                                         ↑
-                                              Intel VT-x/AMD-V + EPT/NPT
-                                              Firecracker VMM (~50k LoC Rust)
-```
-
-| Layer | Protection |
-|-------|------------|
-| Container → Guest OS | Standard Docker isolation |
-| Guest OS → Host | **Hardware VM isolation (KVM)** |
-| VMM (Firecracker) | Minimal Rust codebase, seccomp-filtered |
-| Network | Separate TAP device, NAT'd |
-
-Even if a container escapes Docker, it's still trapped inside the VM.
-
-## Persistence
-
-| What | Persists? | Location |
-|------|-----------|----------|
-| `/workspace` | ✅ Yes | Mounted from host |
-| Docker images | ❌ No | Lost on VM restart |
-| Container data | ❌ No | Lost on VM restart |
-| VM rootfs changes | ❌ No | Read from image |
-
-To persist Docker images, use a registry or rebuild from Dockerfiles in `/workspace`.
-
-## Networking
-
-| Address | Description |
-|---------|-------------|
-| 172.16.0.1 | Host gateway (TAP) |
-| 172.16.0.2 | VM (eth0) |
-
-The VM has internet access via NAT. Containers inside the VM use Docker's default bridge network.
-
-## Building Custom Images
-
-You can extend the base to add your own tools:
-
-```dockerfile
-FROM firecracker-base:latest
-
-# The guest rootfs is at /var/lib/firecracker/rootfs/base.ext4
-# You'd need to mount and modify it, or build a custom rootfs
-
-# For most cases, just install tools via Docker inside the VM
-```
-
-Or install tools at runtime inside the VM:
-```bash
-# Inside VM
-sudo apt-get update
-sudo apt-get install -y your-package
-```
+## Standard Default Configuration
+| Variable | Default | Description |
+|----------|---------|-------------|
+| FC_VCPU | 30 | Number of vCPUs |
+| FC_MEM | 20000 | Memory in MB |
+| FC_WORKSPACE_SIZE | 10000 | Workspace image size in MB |
+| FC_LOG_LEVEL | Warning | Log level: Error, Warning, Info, Debug |
 
 ## Troubleshooting
 
-### "KVM not available"
-```bash
-# Load KVM module
-sudo modprobe kvm
-sudo modprobe kvm_intel  # or kvm_amd
+### Docker Not Starting
 
-# See TURNONKVM.md for details
+If Docker isn't running inside the VM, run the diagnostic script:
+
+```bash
+sudo diagnose-docker.sh
 ```
 
-### "Docker not starting in VM"
-```bash
-# Check Docker status
-sudo systemctl status docker
+This will check:
+- Kernel features (cgroups, namespaces, overlay fs)
+- Netfilter/iptables support
+- Network connectivity
+- Docker service status
 
-# View logs
-sudo journalctl -u docker
-```
+### Common Issues
 
-### "Out of disk space in VM"
-The rootfs is ~8GB. For heavy Docker usage:
-```bash
-# Prune unused images/containers
-docker system prune -a
-```
+#### "iptables: Protocol not supported"
 
-## Files
+This indicates the kernel is missing netfilter support. The kernel must be built with full netfilter configuration including:
+
+- `CONFIG_NETFILTER=y`
+- `CONFIG_NF_CONNTRACK=y`
+- `CONFIG_NF_NAT=y`
+- `CONFIG_IP_NF_IPTABLES=y`
+- `CONFIG_IP_NF_NAT=y`
+- `CONFIG_IP_NF_FILTER=y`
+- And many more (see `config/kernel-firecracker-docker.config`)
+
+**Solution**: Rebuild the image with the complete kernel config.
+
+#### "Cannot connect to Docker daemon"
+
+1. Check if Docker service started:
+   ```bash
+   sudo systemctl status docker
+   ```
+
+2. Check Docker logs:
+   ```bash
+   sudo journalctl -u docker
+   # or
+   sudo cat /var/log/dockerd.log
+   ```
+
+3. Try manually starting Docker:
+   ```bash
+   sudo systemctl start docker
+   ```
+
+#### Network Issues
+
+If containers can't access the internet:
+
+1. Verify the VM has network access:
+   ```bash
+   ping 8.8.8.8
+   ping google.com
+   ```
+
+2. Check iptables rules:
+   ```bash
+   sudo iptables -t nat -L -n
+   ```
+
+3. Verify IP forwarding is enabled:
+   ```bash
+   cat /proc/sys/net/ipv4/ip_forward
+   ```
+
+### Kernel Requirements for Docker
+
+Docker requires extensive kernel support. The `kernel-firecracker-docker.config` file includes:
+
+**Namespaces** (container isolation):
+- PID, NET, IPC, UTS, USER, CGROUP namespaces
+
+**Control Groups** (resource management):
+- Full cgroups v2 support
+- Memory, CPU, PID, device controllers
+
+**Filesystems**:
+- Overlay filesystem (Docker's storage driver)
+- EXT4, tmpfs, proc, sysfs
+
+**Networking**:
+- Bridge, veth, macvlan, vxlan
+- Full netfilter/iptables stack
+- NAT, masquerade, connection tracking
+
+**Security**:
+- Seccomp for syscall filtering
+- AppArmor support
+
+## Architecture
+
+### Build Process
+
+1. **kernel-build stage**: Compiles Linux kernel with Docker-compatible config
+2. **rootfs-builder stage**: Creates Ubuntu rootfs with Docker installed
+3. **runtime stage**: Minimal Alpine image with Firecracker VMM
+
+### Runtime Flow
+
+1. Host starts Docker container with firecracker-base
+2. Container sets up TAP networking and NAT
+3. Firecracker VMM starts MicroVM
+4. MicroVM boots Ubuntu with Docker
+5. Guest init script starts Docker daemon
+6. User gets shell with full Docker access
+
+### Files
 
 ```
 firecracker-base/
-├── Dockerfile           # Multi-stage: Firecracker + kernel + rootfs w/ Docker
-├── docker-compose.yml   # Run configuration
-├── scripts/
-│   ├── entrypoint.sh    # VMM startup
-│   ├── setup-network.sh # TAP/NAT setup
-│   ├── create-workspace-image.sh
-│   └── guest-init.sh    # Runs inside VM at boot
+├── build.sh                    # Build script (handles privileged mode)
+├── docker-compose.yml          # Docker Compose configuration
+├── Dockerfile                  # Multi-stage build definition
 ├── config/
-│   └── firecracker.json.template
-├── TURNONKVM.md         # KVM troubleshooting
-└── workspace/           # Default mount point
+│   ├── firecracker.json.template   # Firecracker VM config
+│   └── kernel-firecracker-docker.config  # Kernel config for Docker
+└── scripts/
+    ├── entrypoint.sh           # Container entrypoint
+    ├── setup-network.sh        # TAP/NAT network setup
+    ├── create-workspace-image.sh   # Workspace ext4 creation
+    ├── guest-init.sh           # VM initialization script
+    └── diagnose-docker.sh      # Docker diagnostics
 ```
 
-## Performance
+## Development
 
-| Metric | Value |
-|--------|-------|
-| VM boot time | ~1-2 seconds |
-| Memory overhead | ~5MB (VMM) |
-| Nested Docker overhead | ~5-10% |
-| Image size | ~4GB (includes Docker) |
+### Rebuilding the Kernel
+
+If you need to modify the kernel config:
+
+1. Edit `config/kernel-firecracker-docker.config`
+2. Rebuild: `./build.sh --no-cache`
+
+### Testing Changes
+
+```bash
+# Build and run interactively
+./build.sh && \
+docker run --rm -it \
+  --device /dev/kvm \
+  --cap-add NET_ADMIN \
+  firecracker-base:latest
+```
+
+### Adding Packages to the VM
+
+Modify the `debootstrap --include=...` line in the Dockerfile to add system packages, or install Docker packages in the Docker installation section.
+
+## Security Considerations
+
+- The VM is isolated from the host at the hardware level
+- Docker inside the VM has full capabilities (within the VM)
+- Network access is through NAT from the host container
+- Workspace files are synced via ext4 image, not direct mount
+
+## Note about MMDS 
+
+- MMDS Enabled But Never Used
+- File: config/firecracker.json.template (lines 38-41)
+- MMDS V2 is configured on eth0 but no code populates the MMDS data store or configures the MMDS address (169.254.169.254). This is harmless but adds unnecessary complexity. If you plan to use MMDS for passing metadata to the guest (like cloud-init does), you'd need API calls to populate it.
 
 ## License
 
-MIT
+Apache 2.0
