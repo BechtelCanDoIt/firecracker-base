@@ -1,8 +1,8 @@
 # Firecracker-Base: Hardware-Isolated Docker Environment For AI Agents
 
 <div style="text-align: center;">
-  <img src="./images/Docker.png" alt="Docker image" width="100">
-  <img src="./images/fc_logo_full_transparent-bg.png" alt="Firecracker image" width="500">  
+  <img src="./images/Docker.png" alt="Docker image" width="100" align="middle">
+  <img src="./images/fc_logo_full_transparent-bg.png" alt="Firecracker image" width="500" align="middle">  
 </div>
 
 ---
