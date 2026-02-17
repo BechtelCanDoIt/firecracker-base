@@ -1,9 +1,9 @@
 # Firecracker-Base: Hardware-Isolated Docker Environment For AI Agents
 
 <div style="text-align: center;">
-  <img src="./images/Docker.png" alt="Docker image" width="100" align="middle">
-  <img src="./images/fc_logo_full_transparent-bg.png" alt="Firecracker image" width="500" align="middle">  
+  <img src="./images/firecrackerbase.jpg" alt="firecracker-base logo" width="50%" align="middle">
 </div>
+
 
 ---
 
@@ -272,3 +272,9 @@ Most of this project was AI Vibe Coded with Opus 4.5 Extended and OpenAI 5.2 Ext
 # License
 
 Apache 2.0
+
+## Build On
+<div style="text-align: center;">
+  <img src="./images/Docker.png" alt="Docker image" width="100" align="middle">
+  <img src="./images/fc_logo_full_transparent-bg.png" alt="Firecracker image" width="500" align="middle">  
+</div>
