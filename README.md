@@ -1,3 +1,8 @@
+<div style="text-align: center;">
+amd64✅ - arm64⚠️
+</div>
+
+
 # Firecracker-Base: Hardware-Isolated Docker Environment For AI Agents
 
 <div style="text-align: center;">
