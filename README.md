@@ -1,16 +1,19 @@
+
 <div style="text-align: center;">
-amd64✅ - arm64⚠️
+  <p>amd64✅ - arm64⚠️</p>
+  <p><a href="https://deepwiki.com/BechtelCanDoIt/firecracker-base"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a></p>  
 </div>
 
+---
 
 # Firecracker-Base: Hardware-Isolated Docker Environment For AI Agents
 
 <div style="text-align: center;">
-  <img src="./images/firecrackerbase.jpg" alt="firecracker-base logo" width="50%" align="middle">
+  <img src="./images/firecrackerbase.jpg" alt="firecracker-base logo"  align="middle">
 </div>
 
-
 ---
+
 
 Run Docker containers inside a [Firecracker MicroVM](https://firecracker-microvm.github.io/) for maximum security isolation.
 
@@ -36,6 +39,7 @@ This project is needed in order to run Firecracker inside of Docker on the host 
 └─────────────────────────────────────────────────────────────┘
 ```
 
+But this is just a base image for other projects to utilize. Please see [**Dependent Projects**](#dependent-projects) for an example of some of them.
 
 ## **Problem** AI Agent Escape To Host System
 I want to have a system where I can experiment with AI Agents but not allow it to roam through my harddrive.
@@ -271,10 +275,12 @@ docker run --rm -it \
 
 Modify the `debootstrap --include=...` line in the Dockerfile to add system packages, or install Docker packages in the Docker installation section.
 
+## Dependent Projects ##
+- AI-Sandbox
 
 ## AI Acknowlegement
 
-Most of this project was AI Vibe Coded with Opus 4.5 Extended and OpenAI 5.2 Extended.
+Most of this project was AI Vibe Coded with Opus 4.5/4.6 Extended and OpenAI 5.2 Thinking.
 
 # License
 
@@ -282,6 +288,6 @@ Apache 2.0
 
 ## Build On
 <div style="text-align: center;">
-  <img src="./images/Docker.png" alt="Docker image" width="100" align="middle">
-  <img src="./images/fc_logo_full_transparent-bg.png" alt="Firecracker image" width="500" align="middle">  
+  <a href="https://github.com/docker"><img src="./images/Docker.png" alt="Docker image" width="100" align="middle"></a>
+  <a href="https://github.com/firecracker-microvm/firecracker"><img src="./images/fc_logo_full_transparent-bg.png" alt="Firecracker image" width="500" align="middle"></a>  
 </div>
