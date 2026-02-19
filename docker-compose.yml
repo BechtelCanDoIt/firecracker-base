@@ -65,9 +65,9 @@ services:
     # =========================================================================
     environment:
       # VM Resources (sized for Docker workloads)
-      - FC_VCPU=${FC_VCPU:-30}
-      - FC_MEM=${FC_MEM:-20000}
-      - FC_WORKSPACE_SIZE=${FC_WORKSPACE_SIZE:-10000}
+      - FC_VCPU=${FC_VCPU:-8}
+      - FC_MEM=${FC_MEM:-4096}
+      - FC_WORKSPACE_SIZE=${FC_WORKSPACE_SIZE:-4096}
       
       # Logging
       - FC_LOG_LEVEL=${FC_LOG_LEVEL:-Warning}

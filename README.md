@@ -222,22 +222,24 @@ docker compose up
 cd /workspace && docker build .
 ```
 
-### Standard Default Configuration
+### Standard Configuration - Home Dev System
+This works just fine but is a little slower for startup. It also doesn't provide much for what you might install inside the microVM.
+
+However since this is a base package it's really the child docker images sizing that is important.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| FC_VCPU | 2 | Number of vCPUs |
+| FC_MEM | 2048 | Memory in MB |
+| FC_WORKSPACE_SIZE | 2048 | Workspace image size in MB |
+| FC_LOG_LEVEL | Warning | Log level: Error, Warning, Info, Debug |
+
+### Big Server Configuration Suggestion For Child Image
 | Variable | Default | Description |
 |----------|---------|-------------|
 | FC_VCPU | 30 | Number of vCPUs |
 | FC_MEM | 20000 | Memory in MB |
 | FC_WORKSPACE_SIZE | 10000 | Workspace image size in MB |
-| FC_LOG_LEVEL | Warning | Log level: Error, Warning, Info, Debug |
-
-### Light Configuration - Home Dev System
-This works just fine but is a little slower for startup. It also doesn't provide much for what you might install inside the microVM.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| FC_VCPU | 4 | Number of vCPUs |
-| FC_MEM | 4096 | Memory in MB |
-| FC_WORKSPACE_SIZE | 4096 | Workspace image size in MB |
 | FC_LOG_LEVEL | Warning | Log level: Error, Warning, Info, Debug |
 
 
