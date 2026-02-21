@@ -12,9 +12,6 @@
   <img src="./images/firecrackerbase.jpg" alt="firecracker-base logo"  align="middle">
 </div>
 
----
-
-
 Run Docker containers inside a [Firecracker MicroVM](https://firecracker-microvm.github.io/) for maximum security isolation.
 
 This project is needed in order to run Firecracker inside of Docker on the host machine. And then in turn run a seperate Docker instance in the guest machine of the VM.
