@@ -273,7 +273,7 @@ docker run --rm -it \
 Modify the `debootstrap --include=...` line in the Dockerfile to add system packages, or install Docker packages in the Docker installation section.
 
 ## Dependent Projects ##
-- AI-Sandbox
+- [AI-Dev-Sandbox](https://github.com/BechtelCanDoIt/ai-dev-sandbox)
 
 ## AI Acknowlegement
 
